@@ -69,4 +69,3 @@ These are the archived synthesized schematics. They illustrate the mapped logic,
 | `synthesis/normal_alu/` | Baseline Genus script, log, reports, netlist, exported SDC, and SDF |
 | `synthesis/approx_alu/` | Approximate Genus script, log, reports, netlist, exported SDC, and SDF |
 | `results/` | Simulation screenshots, Genus report captures, and synthesized schematics |
-
