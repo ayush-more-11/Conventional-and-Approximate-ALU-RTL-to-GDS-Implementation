@@ -1,113 +1,90 @@
-# 8-bit ALU vs. Approximate ALU — RTL, Simulation and Genus Synthesis
+# Exact and Approximate 8-bit ALU
 
-Two 8-bit synchronous ALUs, an exact baseline (`alu`) and an approximate variant (`approx_alu`), taken through RTL simulation (baseline only) and logic synthesis with Cadence Genus. Every file in this repository is an unmodified original from the project archive. This README and `MANIFEST.md` are the only added files.
+This repository compares two synchronous 8-bit ALUs:
 
-> **Evidence scope.** All results below come from files in this repository. Anything not backed by a file is marked **not available** or **unverified**. See [Verification status](#verification-status).
+- **`alu`** — exact arithmetic.
+- **`approx_alu`** — the same operations, but with approximate 8-bit addition and subtraction.
 
-## Designs
+Both designs have the same interface and eight operations. The checked-in Genus reports show that the approximate version maps to fewer cells, lower reported area, and lower estimated power, but has a slightly longer reported worst data path. These are synthesis results, not placed-and-routed measurements.
 
-Both designs share one interface: `clk`, active-low asynchronous reset `rst_n`, operands `A[7:0]` and `B[7:0]`, select `ALU_Sel[2:0]`, registered outputs `ALU_Out[7:0]` and `CarryOut`.
+## Design comparison
 
-| `ALU_Sel` | `alu` (exact) | `approx_alu` |
-|---|---|---|
-| `000` | A + B, 9-bit result, carry out | **Approximate:** bits [7:2] exact add, bits [1:0] = `A[1:0] \| B[1:0]`; `CarryOut` = carry of the upper 6-bit add; no carry from the lower 2 bits into the upper add |
-| `001` | A − B, borrow in `CarryOut` | **Approximate:** bits [7:2] exact subtract, bits [1:0] = `A[1:0] ^ B[1:0]`; `CarryOut` = borrow of the upper 6-bit subtract |
-| `010` | A × B, low 8 bits | Same as `alu` |
-| `011` | A & B | Same |
-| `100` | A \| B | Same |
-| `101` | A ^ B | Same |
-| `110` | Shift left by 1, `CarryOut` = `A[7]` | Same |
-| `111` | `A > B` → 1 else 0 | Same |
+| `ALU_Sel` | Operation | `alu` | `approx_alu` |
+|---|---|---|---|
+| `000` | Add | Exact 8-bit sum; `CarryOut` is the carry out | Bits `[7:2]` add exactly; bits `[1:0]` are `A[1:0] \| B[1:0]`. No carry propagates from the low two bits into the upper addition. `CarryOut` is the upper-six-bit carry. |
+| `001` | Subtract | Exact 8-bit difference; `CarryOut` indicates unsigned borrow | Bits `[7:2]` subtract exactly; bits `[1:0]` are `A[1:0] ^ B[1:0]`. No borrow propagates from the low two bits into the upper subtraction. `CarryOut` is the upper-six-bit borrow. |
+| `010` | Multiply | Low eight bits of `A * B` | Same as `alu` |
+| `011` | AND | `A & B` | Same as `alu` |
+| `100` | OR | `A \| B` | Same as `alu` |
+| `101` | XOR | `A ^ B` | Same as `alu` |
+| `110` | Shift left | `{A[6:0], 1'b0}`; `CarryOut = A[7]` | Same as `alu` |
+| `111` | Greater-than comparison | `ALU_Out = 1` when unsigned `A > B`, otherwise `0` | Same as `alu` |
 
-## Repository layout
+Both modules register `ALU_Out` and `CarryOut` on the rising edge of `clk`, and clear them with an asynchronous active-low `rst_n`.
 
-```
-rtl/            alu.v, approx_alu.v
-tb/             alu_tb.v, approx_alu_tb.v
-constraints/    alu.sdc                        (used by both synthesis runs; files are byte-identical)
-simulation/
-  normal_alu/   irun.log, waves.shm/           (Cadence irun / SimVision)
-synthesis/
-  normal_alu/   scripts/ logs/ reports/ netlist/
-  approx_alu/   scripts/ logs/ reports/ netlist/
-docs/images/
-  simulation/   console + waveform screenshots (baseline ALU)
-  synthesis/    Genus timing terminal captures, gate-level schematics
-MANIFEST.md     what was kept, what was excluded and why, SHA-256 of every kept file
-```
+The approximation only affects the low two bits of addition and subtraction and their connection to the upper arithmetic. For example, `3 + 1` produces `3` in `approx_alu` rather than the exact result `4`; `4 - 1` produces `5` rather than `3`. The multiplication, logic, shift, and comparison operations remain exact and match the baseline.
 
-## Verification status
+## Synthesis comparison
 
-| Item | `alu` | `approx_alu` |
-|---|---|---|
-| Testbench present | Yes, 13 directed tests (`tb/alu_tb.v`) | Yes, 37 directed tests plus a reset check (`tb/approx_alu_tb.v`) |
-| Simulation log / waveform in archive | **Yes.** `simulation/normal_alu/irun.log` reports `VERIFICATION SUMMARY: 13 Passed, 0 Failed`, `$finish` at 290 NS. Screenshots in `docs/images/simulation/`. | **No.** No log, waveform or screenshot of an `approx_alu` simulation exists in the archive. Pass/fail is **unverified**. |
-| Genus synthesis | Completed, `Error=0` (`genus.log1`) | Completed, `Error=0` (`genus.log`) |
-| Setup timing | Worst reported path met | Worst reported path met |
-| Hold timing, DRC, formal equivalence, place and route, gate-level simulation with the SDF | **Not available** in the archive | **Not available** |
-| Approximation error metrics (error rate, MED, etc.) | n/a | **Not available.** Only hand-written expected values inside the testbench. |
+The values below are transcribed from the checked-in Genus [cell-area](synthesis/normal_alu/reports/alu_cell.rep), [power](synthesis/normal_alu/reports/alu_power.rep), and [timing](synthesis/normal_alu/reports/alu_timing.rep) reports and the corresponding [`approx_alu` reports](synthesis/approx_alu/reports/). The same `constraints/alu.sdc` is read by both synthesis scripts. It specifies a 10 ns clock, 0.1 ns clock transitions, 0.01 ns clock uncertainty, and 1 ns input/output delays.
 
-The baseline testbench is directed, with 13 vectors covering each of the 8 operations at least once. No coverage report is present, so no coverage figure is claimed.
+| Metric | `alu` | `approx_alu` | Approximate vs. exact |
+|---|---:|---:|---:|
+| Standard-cell count | 240 | 218 | −22 (−9.17%) |
+| Total cell area | 1382.099 | 1302.625 | −79.474 (−5.75%) |
+| Leakage power | 5.73318 µW | 5.40602 µW | −5.71% |
+| Internal power | 46.2236 µW | 43.8054 µW | −5.23% |
+| Switching power | 15.2620 µW | 14.0491 µW | −7.95% |
+| Total power | 67.2187 µW | 63.2606 µW | −5.89% |
+| Worst reported data-path delay | 2172 ps | 2338 ps | +166 ps (+7.64%) |
+| Worst setup slack | 6747 ps | 6581 ps | −166 ps |
 
-## Synthesis results (Cadence Genus 21.14-s082_1)
+**How to read these results:** both timing reports mark the worst setup path as met. In both designs, that reported path traverses the multiplier and ends at `ALU_Out_reg[6]/D`; it is not an adder/subtractor path. The approximate version has lower reported area and power, but the report does **not** show an improvement in the worst data-path delay or slack. The cell-area report does not specify an area unit. The power reports identify a single tool frame (`/stim#0/frame#0`); no VCD or SAIF activity file is included, so treat power as a Genus estimate rather than a measurement of a defined workload.
 
-Setup from `rc_script.tcl` and `constraints/alu.sdc`: library `slow.lib` located at `/home/install/FOUNDRY/digital/90nm/dig/lib` (the library itself is **not** in the archive; the 90 nm label comes from that path only). Operating conditions are reported as `slow (balanced_tree)`. Clock 10.0 ns (100 MHz), clock transition 0.1 ns, uncertainty 0.01 ns, input and output delays 1.0 ns.
+The reports were generated by Cadence Genus 21.14-s082_1 using the `slow` library and `slow (balanced_tree)` operating conditions. The library itself is not included; the synthesis scripts refer to a machine-specific library path.
 
-| Metric | `alu` | `approx_alu` | Difference (approx − exact) | Source |
-|---|---|---|---|---|
-| Cell count | 240 | 218 | −22 (−9.17 %) | `*_cell.rep` |
-| Total cell area | 1382.099 | 1302.625 | −79.474 (−5.75 %) | `*_cell.rep` |
-| Leakage power (W) | 5.73318e-06 | 5.40602e-06 | −5.71 % | `*_power.rep` |
-| Internal power (W) | 4.62236e-05 | 4.38054e-05 | −5.23 % | `*_power.rep` |
-| Switching power (W) | 1.52620e-05 | 1.40491e-05 | −7.95 % | `*_power.rep` |
-| Total power (W) | 6.72187e-05 | 6.32606e-05 | −5.89 % | `*_power.rep` |
-| Worst setup slack (ps) | 6747 | 6581 | −166 (−2.46 %) | `*_timing.rep` |
-| Worst path data delay (ps) | 2172 | 2338 | +166 (+7.64 %) | `*_timing.rep` |
+The other archived Genus captures are available as [timing report 1](results/Genus_Timing_report1.png), [timing report 2](results/Genus_Timing_report2.png), [power details](results/Genus_Power_Details.png), [datapath area](results/Genus_Report_DataPath.png), and [gate-level schematic](results/Genus_Gate_Level_Schematic.png). These screenshots document the baseline `alu` run; the `.rep` files are the source for the numeric comparison above.
 
-The Difference column was computed from the reported values. Area units are as printed by Genus; the report does not state a unit.
+## Verification evidence
 
-Notes on interpretation:
+The repository contains a directed testbench for each RTL design. The baseline simulation screenshot shows **13 passed, 0 failed**. The approximate testbench contains 37 directed operation tests and an asynchronous-reset check, but no run log or result screenshot for that testbench is included, so its pass/fail result is **not verified here**.
 
-- The worst setup path in both designs runs through the multiplier (`mul_15_34_*` in `alu`, `mul_34_33_*` in `approx_alu`) to `ALU_Out_reg[6]/D`. The approximate adder and subtractor are therefore not on the reported critical path, and the approximate design shows lower slack, not higher.
-- Only the worst setup path (`report_timing` default) is in the archive. Slack on other paths is not available.
-- Power reports cite `PDB Frames: /stim#0/frame#0`. No VCD or SAIF file is in the archive, so treat these as tool estimates, not measurements of the simulated workload. The `approx_alu` subtotal row prints `100.01 %` in the original report; this is a rounding artifact in the tool output and was left untouched.
-- All numbers in the table come from the `.rep` files. Screenshots are supporting evidence only.
+The waveform below is the archived SimVision capture of the **baseline `alu` testbench only**. It is an image, not a waveform database; there is no corresponding waveform file for the approximate design.
 
-## Reproducing the flow
+![Baseline ALU simulation waveform showing the 13-test run](results/RTL_Verification_Waveform.png)
 
-Tool versions seen in the logs: Cadence irun 15.20-s086 (simulation) and Genus 21.14-s082_1 (synthesis). Neither tool nor the `slow.lib` library is included, and this repository was **not** re-run in preparing it. The commands below are untested here.
+The accompanying console capture shows the baseline test summary:
 
-The original scripts used relative file names, so stage the files in one working directory first:
+![Baseline ALU simulation console showing 13 passed and 0 failed](results/RTL_Verification.png)
 
-```bash
-# Exact ALU synthesis
-mkdir work_alu && cd work_alu
-cp ../rtl/alu.v ../constraints/alu.sdc ../synthesis/normal_alu/scripts/rc_script.tcl .
-genus            # then at the prompt: source rc_script.tcl
+## Genus schematics
 
-# Approximate ALU synthesis
-mkdir work_approx && cd work_approx
-cp ../rtl/approx_alu.v ../constraints/alu.sdc ../synthesis/approx_alu/scripts/rc_script.tcl .
-genus            # then at the prompt: source rc_script.tcl
-```
+These are the archived synthesized schematics. They illustrate the mapped logic, not a physical layout or a place-and-route result.
 
-Simulation (baseline), as recorded in `simulation/normal_alu/irun.log`:
+| Exact `alu` | Approximate `approx_alu` |
+|---|---|
+| ![Genus schematic for the exact ALU](results/Genus_normal_alu_gui_schematic.gif) | ![Genus schematic for the approximate ALU](results/Genus_approx_alu_gui_schematic.gif) |
+
+## Repository contents
+
+| Path | Contents |
+|---|---|
+| `rtl/alu.v`, `rtl/approx_alu.v` | Exact and approximate RTL |
+| `tb/alu_tb.v`, `tb/approx_alu_tb.v` | Directed Verilog testbenches |
+| `constraints/alu.sdc` | Input timing constraints used by both synthesis scripts |
+| `synthesis/normal_alu/` | Baseline Genus script, log, reports, netlist, exported SDC, and SDF |
+| `synthesis/approx_alu/` | Approximate Genus script, log, reports, netlist, exported SDC, and SDF |
+| `results/` | Simulation screenshots, Genus report captures, and synthesized schematics |
+
+## Reproducing the flows
+
+The source archive does not include Cadence tools or the `slow.lib` standard-cell library. The synthesis scripts also use relative RTL and SDC filenames and end with `gui_show`; run each script from a working directory containing the corresponding RTL file and a copy of `alu.sdc`, with the library path in `rc_script.tcl` updated for your environment.
+
+To run the testbenches with Cadence irun, use the matching RTL and testbench files:
 
 ```bash
-irun alu.v alu_tb.v -access +rwc -gui
+irun rtl/alu.v tb/alu_tb.v -access +rwc
+irun rtl/approx_alu.v tb/approx_alu_tb.v -access +rwc
 ```
 
-Edit `set_db lib_search_path` in `rc_script.tcl` to point at your own library location.
-
-## File notes
-
-- `synthesis/normal_alu/logs/genus.log1` and `scripts/genus.cmd1` belong to the successful run. An earlier failed run (it called the removed `synthesize` command, error `SYNTH-29`) was excluded.
-- `synthesis/normal_alu/netlist/alu_sdc.sdc` and `synthesis/approx_alu/netlist/approx_alu_sdc.sdc` are the SDC files exported by Genus, not the input constraints.
-- `rc_script.tcl` ends with `gui_show`, which needs a display.
-- The header comment in `rtl/approx_alu.v` names Innovus and Vivado as target tools. No Innovus or Vivado output exists in the archive.
-- File names such as `genus.log1` and `genus.cmd1` are original names and were not changed.
-- `docs/images/synthesis/Genus_approx_alu_gui_schematic.gif` is labeled by its original file name; the GIF itself carries no design name.
-
-## Authorship and license
-
-Not specified in the archive. Add author and license information before publishing.
+Only the baseline run is represented by archived simulation evidence. Running either command locally requires a compatible simulator; running the synthesis flow additionally requires Genus and the referenced standard-cell library.
